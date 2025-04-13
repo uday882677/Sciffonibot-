@@ -42,7 +42,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("My Alerts", callback_data="alerts")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Welcome to SciffoniBot! 🚀", reply_markup=reply_markup)
+    await update.message.reply_text(
+        "Welcome to SciffoniBot! 🚀",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -64,7 +68,11 @@ async def check_missed_tokens(app, session):
                 if coin_data and apply_filters(coin_data):
                     text = format_coin_alert(coin_data)
                     for chat_id in app.subscribed_chats:
-                        await app.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+                        await app.bot.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            parse_mode="HTML"
+                        )
     except Exception as e:
         print(f"Error checking missed tokens: {e}")
 
@@ -91,7 +99,11 @@ async def detect_meme_coins(app):
                                 text = format_coin_alert(coin_data)
                                 for chat_id in app.subscribed_chats:
                                     try:
-                                        await app.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+                                        await app.bot.send_message(
+                                            chat_id=chat_id,
+                                            text=text,
+                                            parse_mode="HTML"
+                                        )
                                     except Exception as e:
                                         print(f"Error sending to {chat_id}: {e}")
                         await asyncio.sleep(0.1)
@@ -171,7 +183,11 @@ def run_telegram_bot():
     async def set_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.effective_chat.id
         app.subscribed_chats.add(chat_id)
-        await context.bot.send_message(chat_id=chat_id, text="Registered for alerts! 📢")
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Registered for alerts! 📢",
+            parse_mode="HTML"
+        )
 
     app.add_handler(CommandHandler("register", set_chat_id))
     
