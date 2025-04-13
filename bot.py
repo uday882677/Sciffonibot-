@@ -22,7 +22,8 @@ def run_dummy_server():
 # Start the dummy server in a separate thread
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8053400424:AAFTX80K4pdRicyKJlNKlb2TNFEjiunljTk")
+# Replace with your new token from BotFather
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_NEW_TOKEN_HERE")  # Replace YOUR_NEW_TOKEN_HERE with the new token
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "b0b224fa-0850-4e15-8068-e48184260227")
 HELIUS_WS_URL = f"wss://ws-mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
 PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
@@ -173,7 +174,7 @@ def format_coin_alert(data):
         f"<a href='{data['chart_url']}'>Chart</a>"
     )
 
-def run_telegram_bot():
+async def run_bot():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.subscribed_chats = set()
 
@@ -192,24 +193,13 @@ def run_telegram_bot():
     app.add_handler(CommandHandler("register", set_chat_id))
     
     print("SciffoniBot running...")
-    app.run_polling()
-
-async def run_meme_coin_detector(app):
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
     await detect_meme_coins(app)
+    await app.updater.stop()
+    await app.stop()
+    await app.shutdown()
 
 if __name__ == "__main__":
-    # Create the Telegram app instance
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.subscribed_chats = set()
-
-    # Create separate event loops for Telegram bot and meme coin detector
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    # Start the Telegram bot in a separate thread
-    telegram_thread = threading.Thread(target=run_telegram_bot)
-    telegram_thread.start()
-
-    # Run the meme coin detector in the main thread
-    loop.run_until_complete(run_meme_coin_detector(app))
-    
+    asyncio.run(run_bot())
