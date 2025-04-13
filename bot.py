@@ -144,7 +144,10 @@ def format_coin_alert(data):
         f"<a href='{data['chart_url']}'>Chart</a>"
     )
 
-async def run_telegram_bot(app):
+def run_telegram_bot():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.subscribed_chats = set()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     
@@ -156,17 +159,24 @@ async def run_telegram_bot(app):
     app.add_handler(CommandHandler("register", set_chat_id))
     
     print("SciffoniBot running...")
-    await app.run_polling()
+    app.run_polling()
 
-async def main():
+async def run_meme_coin_detector(app):
+    await detect_meme_coins(app)
+
+if __name__ == "__main__":
+    # Create the Telegram app instance
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.subscribed_chats = set()
 
-    # Run both tasks concurrently
-    await asyncio.gather(
-        run_telegram_bot(app),
-        detect_meme_coins(app)
-    )
+    # Create separate event loops for Telegram bot and meme coin detector
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    # Start the Telegram bot in a separate thread
+    import threading
+    telegram_thread = threading.Thread(target=run_telegram_bot)
+    telegram_thread.start()
+
+    # Run the meme coin detector in the main thread
+    loop.run_until_complete(run_meme_coin_detector(app))
