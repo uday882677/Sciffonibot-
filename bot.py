@@ -2,8 +2,25 @@ import os
 import asyncio
 import json
 import aiohttp
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+
+# Dummy HTTP Server to satisfy Render's port binding requirement
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"SciffoniBot is running!")
+
+def run_dummy_server():
+    server = HTTPServer(("", 8000), DummyHandler)
+    server.serve_forever()
+
+# Start the dummy server in a separate thread
+threading.Thread(target=run_dummy_server, daemon=True).start()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8053400424:AAFTX80K4pdRicyKJlNKlb2TNFEjiunljTk")
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "b0b224fa-0850-4e15-8068-e48184260227")
@@ -174,7 +191,6 @@ if __name__ == "__main__":
     asyncio.set_event_loop(loop)
 
     # Start the Telegram bot in a separate thread
-    import threading
     telegram_thread = threading.Thread(target=run_telegram_bot)
     telegram_thread.start()
 
