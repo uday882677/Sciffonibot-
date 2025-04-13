@@ -212,3 +212,4 @@ if __name__ == "__main__":
 
     # Run the meme coin detector in the main thread
     loop.run_until_complete(run_meme_coin_detector(app))
+    
