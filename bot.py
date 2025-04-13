@@ -22,8 +22,8 @@ def run_dummy_server():
 # Start the dummy server in a separate thread
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-# Replace with your new token from BotFather
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_NEW_TOKEN_HERE")  # Replace YOUR_NEW_TOKEN_HERE with the new token
+# Bot token (already updated in Render environment)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "b0b224fa-0850-4e15-8068-e48184260227")
 HELIUS_WS_URL = f"wss://ws-mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
 PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
@@ -39,12 +39,12 @@ FILTERS = {
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("Filter Settings", callback_data="filters")],
-        [InlineKeyboardButton("My Alerts", callback_data="alerts")]
+        [InlineKeyboardButton("Filter Settings ⚙️", callback_data="filters")],
+        [InlineKeyboardButton("My Alerts 📩", callback_data="alerts")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "Welcome to SciffoniBot! 🚀",
+        "Welcome to SciffoniBot! 🚀\n\nI will notify you about new meme coins on Pump.fun that match your filters! 🎉",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -63,6 +63,9 @@ async def check_missed_tokens(app, session):
             f"https://api.helius.xyz/v0/transactions?api-key={HELIUS_API_KEY}",
             params={"programId": PUMP_PROGRAM_ID, "type": "CREATE"}
         ) as resp:
+            if resp.status != 200:
+                print(f"Helius API error: {resp.status} - {await resp.text()}")
+                return
             txs = await resp.json()
             for tx in txs[-5:]:
                 coin_data = await parse_pumpfun_data({"params": {"result": tx}}, session)
@@ -74,6 +77,7 @@ async def check_missed_tokens(app, session):
                             text=text,
                             parse_mode="HTML"
                         )
+                        print(f"Missed token alert sent to chat {chat_id}: {text}")
     except Exception as e:
         print(f"Error checking missed tokens: {e}")
 
@@ -90,6 +94,7 @@ async def detect_meme_coins(app):
                         "params": [{"mentions": [PUMP_PROGRAM_ID]}, {"commitment": "confirmed"}]
                     }
                     await ws.send_json(subscription)
+                    print("WebSocket subscription sent, waiting for messages...")
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             data = json.loads(msg.data)
@@ -105,6 +110,7 @@ async def detect_meme_coins(app):
                                             text=text,
                                             parse_mode="HTML"
                                         )
+                                        print(f"Alert sent to chat {chat_id}: {text}")
                                     except Exception as e:
                                         print(f"Error sending to {chat_id}: {e}")
                         await asyncio.sleep(0.1)
@@ -120,17 +126,23 @@ async def parse_pumpfun_data(data, session):
                 mint_address = None
                 for subsequent_log in logs[logs.index(log):]:
                     if "Program data:" in subsequent_log:
+                        # Fallback mint_address if not found
+                        if not mint_address:
+                            mint_address = "unknown_mint_address"
                         async with session.get(
                             f"https://api.helius.xyz/v0/tokens/metadata?api-key={HELIUS_API_KEY}",
-                            params={"mintAccounts": [mint_address] if mint_address else []}
+                            params={"mintAccounts": [mint_address]}
                         ) as resp:
+                            if resp.status != 200:
+                                print(f"Helius metadata API error: {resp.status} - {await resp.text()}")
+                                return None
                             metadata = await resp.json()
-                            if metadata:
+                            if metadata and isinstance(metadata, list) and len(metadata) > 0:
                                 metadata = metadata[0]
                                 return {
                                     "name": metadata.get("name", "Unknown"),
                                     "symbol": metadata.get("symbol", "UNK"),
-                                    "address": mint_address or "unknown",
+                                    "address": mint_address,
                                     "liquidity": metadata.get("liquidity", "0 SOL"),
                                     "market_cap": metadata.get("marketCap", "$0"),
                                     "cost": metadata.get("price", 0.0),
@@ -139,7 +151,7 @@ async def parse_pumpfun_data(data, session):
                                     "freeze_revoked": metadata.get("freezeAuthority", None) is None,
                                     "links": metadata.get("socials", []),
                                     "bonding_curve": "linear",
-                                    "chart_url": f"https://dexscreener.com/solana/{mint_address or 'unknown'}"
+                                    "chart_url": f"https://dexscreener.com/solana/{mint_address}"
                                 }
         return None
     except Exception as e:
@@ -161,17 +173,17 @@ def apply_filters(coin_data):
 
 def format_coin_alert(data):
     return (
-        f"<b>{data['name']} ({data['symbol']})</b>\n"
-        f"CA: <code>{data['address']}</code>\n"
-        f"Liquidity: {data['liquidity']}\n"
-        f"Market Cap: {data['market_cap']}\n"
-        f"Cost: {data['cost']} SOL\n"
-        f"Dev Holding: {data['dev_holding']}\n"
-        f"Bonding Curve: {data['bonding_curve']}\n"
-        f"Mint Revoked: {'✅' if data['mint_revoked'] else '❌'}\n"
-        f"Freeze Revoked: {'✅' if data['freeze_revoked'] else '❌'}\n"
-        f"Links: {' | '.join(data['links']) if data['links'] else 'None'}\n"
-        f"<a href='{data['chart_url']}'>Chart</a>"
+        f"🎉 <b>New Meme Coin Alert: {data['name']} ({data['symbol']})</b> 🎉\n\n"
+        f"📍 <b>CA:</b> <code>{data['address']}</code>\n"
+        f"💧 <b>Liquidity:</b> {data['liquidity']}\n"
+        f"📈 <b>Market Cap:</b> {data['market_cap']}\n"
+        f"💸 <b>Cost:</b> {data['cost']} SOL\n"
+        f"👨‍💻 <b>Dev Holding:</b> {data['dev_holding']}\n"
+        f"📉 <b>Bonding Curve:</b> {data['bonding_curve']}\n"
+        f"✅ <b>Mint Revoked:</b> {'Yes' if data['mint_revoked'] else 'No'}\n"
+        f"❄️ <b>Freeze Revoked:</b> {'Yes' if data['freeze_revoked'] else 'No'}\n"
+        f"🔗 <b>Links:</b> {' | '.join(data['links']) if data['links'] else 'None'}\n"
+        f"📊 <a href='{data['chart_url']}'>View Chart on Dexscreener</a>"
     )
 
 async def run_bot():
@@ -186,20 +198,21 @@ async def run_bot():
         app.subscribed_chats.add(chat_id)
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Registered for alerts! 📢",
+            text="Registered for alerts! 📢\n\nYou will now receive notifications for new meme coins on Pump.fun! 🚀",
             parse_mode="HTML"
         )
 
     app.add_handler(CommandHandler("register", set_chat_id))
     
     print("SciffoniBot running...")
+    # Start meme coin detection in a background task
+    asyncio.create_task(detect_meme_coins(app))
+    # Start the Telegram bot
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-    await detect_meme_coins(app)
-    await app.updater.stop()
-    await app.stop()
-    await app.shutdown()
+    # Keep the bot running
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
