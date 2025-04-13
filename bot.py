@@ -159,10 +159,10 @@ async def main():
     app.add_handler(CommandHandler("register", set_chat_id))
 
     print("SciffoniBot running...")
-    # Run detect_meme_coins in the same event loop as run_polling
-    app.job_queue.run_custom(detect_meme_coins, app, job_kwargs={"misfire_grace_time": None})
+    # Create a task for detect_meme_coins using asyncio
+    loop = asyncio.get_event_loop()
+    loop.create_task(detect_meme_coins(app))
     await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
