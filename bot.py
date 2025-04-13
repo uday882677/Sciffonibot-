@@ -144,10 +144,7 @@ def format_coin_alert(data):
         f"<a href='{data['chart_url']}'>Chart</a>"
     )
 
-async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.subscribed_chats = set()
-
+async def run_telegram_bot(app):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     
@@ -157,12 +154,19 @@ async def main():
         await context.bot.send_message(chat_id=chat_id, text="Registered for alerts! 📢")
 
     app.add_handler(CommandHandler("register", set_chat_id))
-
+    
     print("SciffoniBot running...")
-    # Create a task for detect_meme_coins using asyncio
-    loop = asyncio.get_event_loop()
-    loop.create_task(detect_meme_coins(app))
     await app.run_polling()
+
+async def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.subscribed_chats = set()
+
+    # Run both tasks concurrently
+    await asyncio.gather(
+        run_telegram_bot(app),
+        detect_meme_coins(app)
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
