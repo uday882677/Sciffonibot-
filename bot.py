@@ -52,30 +52,35 @@ async def check_missed_tokens(app, session):
         print(f"Error checking missed tokens: {e}")
 
 async def detect_meme_coins(app):
-    async with aiohttp.ClientSession() as session:
-        await check_missed_tokens(app, session)
-        async with session.ws_connect(HELIUS_WS_URL) as ws:
-            subscription = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "logsSubscribe",
-                "params": [{"mentions": [PUMP_PROGRAM_ID]}, {"commitment": "confirmed"}]
-            }
-            await ws.send_json(subscription)
-            async for msg in ws:
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    data = json.loads(msg.data)
-                    if "result" in data:
-                        continue
-                    coin_data = await parse_pumpfun_data(data, session)
-                    if coin_data and apply_filters(coin_data):
-                        text = format_coin_alert(coin_data)
-                        for chat_id in app.subscribed_chats:
-                            try:
-                                await app.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
-                            except Exception as e:
-                                print(f"Error sending to {chat_id}: {e}")
-                await asyncio.sleep(0.1)
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                await check_missed_tokens(app, session)
+                async with session.ws_connect(HELIUS_WS_URL, timeout=30) as ws:
+                    subscription = {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "logsSubscribe",
+                        "params": [{"mentions": [PUMP_PROGRAM_ID]}, {"commitment": "confirmed"}]
+                    }
+                    await ws.send_json(subscription)
+                    async for msg in ws:
+                        if msg.type == aiohttp.WSMsgType.TEXT:
+                            data = json.loads(msg.data)
+                            if "result" in data:
+                                continue
+                            coin_data = await parse_pumpfun_data(data, session)
+                            if coin_data and apply_filters(coin_data):
+                                text = format_coin_alert(coin_data)
+                                for chat_id in app.subscribed_chats:
+                                    try:
+                                        await app.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+                                    except Exception as e:
+                                        print(f"Error sending to {chat_id}: {e}")
+                        await asyncio.sleep(0.1)
+        except Exception as e:
+            print(f"WebSocket error: {e}. Retrying in 10 seconds...")
+            await asyncio.sleep(10)
 
 async def parse_pumpfun_data(data, session):
     try:
@@ -154,7 +159,8 @@ async def main():
     app.add_handler(CommandHandler("register", set_chat_id))
 
     print("SciffoniBot running...")
-    asyncio.create_task(detect_meme_coins(app))
+    # Run detect_meme_coins in the same event loop as run_polling
+    app.job_queue.run_custom(detect_meme_coins, app, job_kwargs={"misfire_grace_time": None})
     await app.run_polling()
 
 if __name__ == "__main__":
