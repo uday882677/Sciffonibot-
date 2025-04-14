@@ -5,7 +5,7 @@ import aiohttp
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
 # Dummy HTTP Server to satisfy Render's port binding requirement
 class DummyHandler(BaseHTTPRequestHandler):
@@ -28,7 +28,8 @@ HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "b0b224fa-0850-4e15-8068-e481842602
 HELIUS_WS_URL = f"wss://ws-mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
 PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"  # Confirmed Pump.fun program ID
 
-FILTERS = {
+# Default filters (user-specific filters will override these)
+DEFAULT_FILTERS = {
     "min_cost": 0.0000000023,
     "max_cost": 0.006,
     "require_mint_revoked": True,
@@ -36,6 +37,9 @@ FILTERS = {
     "require_links": True,
     "pools": ["pumpfun"]
 }
+
+# Store user-specific filters (in-memory for now)
+USER_FILTERS = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Received /start command")
@@ -54,12 +58,99 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    chat_id = query.message.chat_id
     if query.data == "filters":
         print("Filter Settings button clicked")
-        await query.edit_message_text("Filter settings coming soon! 🛠️")
+        keyboard = [
+            [InlineKeyboardButton("Set Min Cost 💸", callback_data="set_min_cost")],
+            [InlineKeyboardButton("Set Max Cost 💰", callback_data="set_max_cost")],
+            [InlineKeyboardButton("Toggle Mint Revoked ✅", callback_data="toggle_mint_revoked")],
+            [InlineKeyboardButton("Toggle Freeze Revoked ❄️", callback_data="toggle_freeze_revoked")],
+            [InlineKeyboardButton("Toggle Require Links 🔗", callback_data="toggle_require_links")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        user_filters = USER_FILTERS.get(chat_id, DEFAULT_FILTERS)
+        filter_summary = (
+            f"Current Filter Settings:\n\n"
+            f"💸 Min Cost: {user_filters['min_cost']} SOL\n"
+            f"💰 Max Cost: {user_filters['max_cost']} SOL\n"
+            f"✅ Mint Revoked: {'Yes' if user_filters['require_mint_revoked'] else 'No'}\n"
+            f"❄️ Freeze Revoked: {'Yes' if user_filters['require_freeze_revoked'] else 'No'}\n"
+            f"🔗 Require Links: {'Yes' if user_filters['require_links'] else 'No'}\n\n"
+            f"Select an option to update your filters:"
+        )
+        await query.edit_message_text(filter_summary, reply_markup=reply_markup, parse_mode="HTML")
     elif query.data == "alerts":
         print("My Alerts button clicked")
         await query.edit_message_text("You will receive meme coin alerts! 📡")
+    elif query.data.startswith("set_"):
+        # Handle filter setting inputs
+        setting = query.data.split("_")[1]  # e.g., "min_cost" or "max_cost"
+        await query.edit_message_text(f"Please enter the {setting.replace('_', ' ')} (in SOL):")
+        context.user_data["setting"] = setting
+    elif query.data.startswith("toggle_"):
+        # Handle toggle settings
+        setting = query.data.split("_")[1] + "_" + query.data.split("_")[2]  # e.g., "mint_revoked"
+        user_filters = USER_FILTERS.get(chat_id, DEFAULT_FILTERS.copy())
+        user_filters[f"require_{setting}"] = not user_filters.get(f"require_{setting}", DEFAULT_FILTERS[f"require_{setting}"])
+        USER_FILTERS[chat_id] = user_filters
+        print(f"Updated {setting} for chat {chat_id}: {user_filters[f'require_{setting}']}")
+        # Show updated filters
+        keyboard = [
+            [InlineKeyboardButton("Set Min Cost 💸", callback_data="set_min_cost")],
+            [InlineKeyboardButton("Set Max Cost 💰", callback_data="set_max_cost")],
+            [InlineKeyboardButton("Toggle Mint Revoked ✅", callback_data="toggle_mint_revoked")],
+            [InlineKeyboardButton("Toggle Freeze Revoked ❄️", callback_data="toggle_freeze_revoked")],
+            [InlineKeyboardButton("Toggle Require Links 🔗", callback_data="toggle_require_links")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        filter_summary = (
+            f"Current Filter Settings:\n\n"
+            f"💸 Min Cost: {user_filters['min_cost']} SOL\n"
+            f"💰 Max Cost: {user_filters['max_cost']} SOL\n"
+            f"✅ Mint Revoked: {'Yes' if user_filters['require_mint_revoked'] else 'No'}\n"
+            f"❄️ Freeze Revoked: {'Yes' if user_filters['require_freeze_revoked'] else 'No'}\n"
+            f"🔗 Require Links: {'Yes' if user_filters['require_links'] else 'No'}\n\n"
+            f"Select an option to update your filters:"
+        )
+        await query.edit_message_text(filter_summary, reply_markup=reply_markup, parse_mode="HTML")
+
+async def handle_filter_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    if "setting" not in context.user_data:
+        return
+    setting = context.user_data["setting"]
+    try:
+        value = float(update.message.text)
+        user_filters = USER_FILTERS.get(chat_id, DEFAULT_FILTERS.copy())
+        user_filters[setting] = value
+        USER_FILTERS[chat_id] = user_filters
+        print(f"Updated {setting} for chat {chat_id}: {value}")
+        await update.message.reply_text(f"{setting.replace('_', ' ').title()} updated to {value} SOL!")
+    except ValueError:
+        await update.message.reply_text("Please enter a valid number (in SOL).")
+    finally:
+        # Show updated filters
+        keyboard = [
+            [InlineKeyboardButton("Set Min Cost 💸", callback_data="set_min_cost")],
+            [InlineKeyboardButton("Set Max Cost 💰", callback_data="set_max_cost")],
+            [InlineKeyboardButton("Toggle Mint Revoked ✅", callback_data="toggle_mint_revoked")],
+            [InlineKeyboardButton("Toggle Freeze Revoked ❄️", callback_data="toggle_freeze_revoked")],
+            [InlineKeyboardButton("Toggle Require Links 🔗", callback_data="toggle_require_links")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        user_filters = USER_FILTERS.get(chat_id, DEFAULT_FILTERS)
+        filter_summary = (
+            f"Current Filter Settings:\n\n"
+            f"💸 Min Cost: {user_filters['min_cost']} SOL\n"
+            f"💰 Max Cost: {user_filters['max_cost']} SOL\n"
+            f"✅ Mint Revoked: {'Yes' if user_filters['require_mint_revoked'] else 'No'}\n"
+            f"❄️ Freeze Revoked: {'Yes' if user_filters['require_freeze_revoked'] else 'No'}\n"
+            f"🔗 Require Links: {'Yes' if user_filters['require_links'] else 'No'}\n\n"
+            f"Select an option to update your filters:"
+        )
+        await update.message.reply_text(filter_summary, reply_markup=reply_markup, parse_mode="HTML")
+        del context.user_data["setting"]
 
 async def check_missed_tokens(app, session):
     try:
@@ -75,15 +166,19 @@ async def check_missed_tokens(app, session):
             print(f"Found {len(txs)} transactions in missed tokens check.")
             for tx in txs[-5:]:
                 coin_data = await parse_pumpfun_data({"params": {"result": tx}}, session)
-                if coin_data and apply_filters(coin_data):
-                    text = format_coin_alert(coin_data)
+                if coin_data:
                     for chat_id in app.subscribed_chats:
-                        await app.bot.send_message(
-                            chat_id=chat_id,
-                            text=text,
-                            parse_mode="HTML"
-                        )
-                        print(f"Missed token alert sent to chat {chat_id}: {text}")
+                        user_filters = USER_FILTERS.get(chat_id, DEFAULT_FILTERS)
+                        if apply_filters(coin_data, user_filters):
+                            text = format_coin_alert(coin_data)
+                            await app.bot.send_message(
+                                chat_id=chat_id,
+                                text=text,
+                                parse_mode="HTML"
+                            )
+                            print(f"Missed token alert sent to chat {chat_id}: {text}")
+                        else:
+                            print(f"Coin rejected for chat {chat_id} due to filters.")
                 else:
                     print("No coin data matched filters in missed tokens check.")
     except Exception as e:
@@ -112,18 +207,22 @@ async def detect_meme_coins(app):
                                 continue
                             print("Received WebSocket message, parsing data...")
                             coin_data = await parse_pumpfun_data(data, session)
-                            if coin_data and apply_filters(coin_data):
-                                text = format_coin_alert(coin_data)
+                            if coin_data:
                                 for chat_id in app.subscribed_chats:
-                                    try:
-                                        await app.bot.send_message(
-                                            chat_id=chat_id,
-                                            text=text,
-                                            parse_mode="HTML"
-                                        )
-                                        print(f"Alert sent to chat {chat_id}: {text}")
-                                    except Exception as e:
-                                        print(f"Error sending to {chat_id}: {e}")
+                                    user_filters = USER_FILTERS.get(chat_id, DEFAULT_FILTERS)
+                                    if apply_filters(coin_data, user_filters):
+                                        text = format_coin_alert(coin_data)
+                                        try:
+                                            await app.bot.send_message(
+                                                chat_id=chat_id,
+                                                text=text,
+                                                parse_mode="HTML"
+                                            )
+                                            print(f"Alert sent to chat {chat_id}: {text}")
+                                        except Exception as e:
+                                            print(f"Error sending to {chat_id}: {e}")
+                                    else:
+                                        print(f"Coin rejected for chat {chat_id} due to filters.")
                             else:
                                 print("No coin data matched filters in WebSocket message.")
                         await asyncio.sleep(0.1)
@@ -139,6 +238,7 @@ async def parse_pumpfun_data(data, session):
                 mint_address = None
                 for subsequent_log in logs[logs.index(log):]:
                     if "Program data:" in subsequent_log:
+                        mint_address = subsequent_log.split()[-1] if not mint_address else mint_address
                         if not mint_address:
                             mint_address = "unknown_mint_address"
                         print(f"Fetching metadata for mint address: {mint_address}")
@@ -174,19 +274,19 @@ async def parse_pumpfun_data(data, session):
         print(f"Error parsing data: {e}")
         return None
 
-def apply_filters(coin_data):
+def apply_filters(coin_data, filters):
     if not coin_data:
         return False
-    if coin_data["cost"] < FILTERS["min_cost"] or coin_data["cost"] > FILTERS["max_cost"]:
-        print(f"Coin rejected: Cost {coin_data['cost']} outside range {FILTERS['min_cost']}-{FILTERS['max_cost']}")
+    if coin_data["cost"] < filters["min_cost"] or coin_data["cost"] > filters["max_cost"]:
+        print(f"Coin rejected: Cost {coin_data['cost']} outside range {filters['min_cost']}-{filters['max_cost']}")
         return False
-    if FILTERS["require_mint_revoked"] and not coin_data["mint_revoked"]:
+    if filters["require_mint_revoked"] and not coin_data["mint_revoked"]:
         print("Coin rejected: Mint not revoked")
         return False
-    if FILTERS["require_freeze_revoked"] and not coin_data["freeze_revoked"]:
+    if filters["require_freeze_revoked"] and not coin_data["freeze_revoked"]:
         print("Coin rejected: Freeze not revoked")
         return False
-    if FILTERS["require_links"] and not coin_data["links"]:
+    if filters["require_links"] and not coin_data["links"]:
         print("Coin rejected: No links provided")
         return False
     print("Coin passed all filters!")
@@ -213,6 +313,7 @@ async def run_bot():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_filter_input))
     
     async def set_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.effective_chat.id
