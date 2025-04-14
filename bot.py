@@ -26,7 +26,7 @@ threading.Thread(target=run_dummy_server, daemon=True).start()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "b0b224fa-0850-4e15-8068-e48184260227")
 HELIUS_WS_URL = f"wss://ws-mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
-PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"  # Confirmed Pump.fun program ID
 
 FILTERS = {
     "min_cost": 0.0000000023,
@@ -38,6 +38,7 @@ FILTERS = {
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Received /start command")
     keyboard = [
         [InlineKeyboardButton("Filter Settings ⚙️", callback_data="filters")],
         [InlineKeyboardButton("My Alerts 📩", callback_data="alerts")]
@@ -48,17 +49,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
+    print("Sent welcome message with buttons")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "filters":
+        print("Filter Settings button clicked")
         await query.edit_message_text("Filter settings coming soon! 🛠️")
     elif query.data == "alerts":
+        print("My Alerts button clicked")
         await query.edit_message_text("You will receive meme coin alerts! 📡")
 
 async def check_missed_tokens(app, session):
     try:
+        print("Checking missed tokens via Helius API...")
         async with session.get(
             f"https://api.helius.xyz/v0/transactions?api-key={HELIUS_API_KEY}",
             params={"programId": PUMP_PROGRAM_ID, "type": "CREATE"}
@@ -67,6 +72,7 @@ async def check_missed_tokens(app, session):
                 print(f"Helius API error: {resp.status} - {await resp.text()}")
                 return
             txs = await resp.json()
+            print(f"Found {len(txs)} transactions in missed tokens check.")
             for tx in txs[-5:]:
                 coin_data = await parse_pumpfun_data({"params": {"result": tx}}, session)
                 if coin_data and apply_filters(coin_data):
@@ -78,6 +84,8 @@ async def check_missed_tokens(app, session):
                             parse_mode="HTML"
                         )
                         print(f"Missed token alert sent to chat {chat_id}: {text}")
+                else:
+                    print("No coin data matched filters in missed tokens check.")
     except Exception as e:
         print(f"Error checking missed tokens: {e}")
 
@@ -86,6 +94,7 @@ async def detect_meme_coins(app):
         try:
             async with aiohttp.ClientSession() as session:
                 await check_missed_tokens(app, session)
+                print(f"Connecting to WebSocket: {HELIUS_WS_URL}")
                 async with session.ws_connect(HELIUS_WS_URL, timeout=30) as ws:
                     subscription = {
                         "jsonrpc": "2.0",
@@ -99,7 +108,9 @@ async def detect_meme_coins(app):
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             data = json.loads(msg.data)
                             if "result" in data:
+                                print("Received subscription confirmation.")
                                 continue
+                            print("Received WebSocket message, parsing data...")
                             coin_data = await parse_pumpfun_data(data, session)
                             if coin_data and apply_filters(coin_data):
                                 text = format_coin_alert(coin_data)
@@ -113,6 +124,8 @@ async def detect_meme_coins(app):
                                         print(f"Alert sent to chat {chat_id}: {text}")
                                     except Exception as e:
                                         print(f"Error sending to {chat_id}: {e}")
+                            else:
+                                print("No coin data matched filters in WebSocket message.")
                         await asyncio.sleep(0.1)
         except Exception as e:
             print(f"WebSocket error: {e}. Retrying in 10 seconds...")
@@ -126,9 +139,9 @@ async def parse_pumpfun_data(data, session):
                 mint_address = None
                 for subsequent_log in logs[logs.index(log):]:
                     if "Program data:" in subsequent_log:
-                        # Fallback mint_address if not found
                         if not mint_address:
                             mint_address = "unknown_mint_address"
+                        print(f"Fetching metadata for mint address: {mint_address}")
                         async with session.get(
                             f"https://api.helius.xyz/v0/tokens/metadata?api-key={HELIUS_API_KEY}",
                             params={"mintAccounts": [mint_address]}
@@ -139,7 +152,7 @@ async def parse_pumpfun_data(data, session):
                             metadata = await resp.json()
                             if metadata and isinstance(metadata, list) and len(metadata) > 0:
                                 metadata = metadata[0]
-                                return {
+                                coin_data = {
                                     "name": metadata.get("name", "Unknown"),
                                     "symbol": metadata.get("symbol", "UNK"),
                                     "address": mint_address,
@@ -153,6 +166,9 @@ async def parse_pumpfun_data(data, session):
                                     "bonding_curve": "linear",
                                     "chart_url": f"https://dexscreener.com/solana/{mint_address}"
                                 }
+                                print(f"Parsed coin data: {coin_data}")
+                                return coin_data
+        print("No relevant logs found for coin creation.")
         return None
     except Exception as e:
         print(f"Error parsing data: {e}")
@@ -162,13 +178,18 @@ def apply_filters(coin_data):
     if not coin_data:
         return False
     if coin_data["cost"] < FILTERS["min_cost"] or coin_data["cost"] > FILTERS["max_cost"]:
+        print(f"Coin rejected: Cost {coin_data['cost']} outside range {FILTERS['min_cost']}-{FILTERS['max_cost']}")
         return False
     if FILTERS["require_mint_revoked"] and not coin_data["mint_revoked"]:
+        print("Coin rejected: Mint not revoked")
         return False
     if FILTERS["require_freeze_revoked"] and not coin_data["freeze_revoked"]:
+        print("Coin rejected: Freeze not revoked")
         return False
     if FILTERS["require_links"] and not coin_data["links"]:
+        print("Coin rejected: No links provided")
         return False
+    print("Coin passed all filters!")
     return True
 
 def format_coin_alert(data):
@@ -201,18 +222,24 @@ async def run_bot():
             text="Registered for alerts! 📢\n\nYou will now receive notifications for new meme coins on Pump.fun! 🚀",
             parse_mode="HTML"
         )
+        print(f"User registered for alerts, chat ID: {chat_id}")
 
     app.add_handler(CommandHandler("register", set_chat_id))
     
     print("SciffoniBot running...")
     # Start meme coin detection in a background task
     asyncio.create_task(detect_meme_coins(app))
-    # Start the Telegram bot
+    # Start the Telegram bot with polling
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
-    # Keep the bot running
-    await asyncio.Event().wait()
+    try:
+        await app.updater.start_polling(drop_pending_updates=True)  # Drop pending updates to avoid conflicts
+        # Keep the bot running
+        await asyncio.Event().wait()
+    finally:
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
